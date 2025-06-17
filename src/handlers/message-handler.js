@@ -1,7 +1,5 @@
 const llog = require('learninglab-log');
-// const ts280 = require('../bots/ts280/index');
-// const rainbowTests = require('../bots/rainbow-tests/index');
-// const bkc = require('../bots/bkc-bots')
+const interviewer = require('../bots/interviewer')
 
 const isBotMessage = (message) => {
     return message.subtype === "bot_message";
@@ -24,8 +22,9 @@ exports.testing = async ({ client, message, say, event }) => {
 
 exports.parseAll = async ({ client, message, say, event }) => {
     llog.cyan("IN THE MESSAGE HANDLER")
+    llog.gray(message);
 
-        // Check if the message is a bot message
+    // Check if the message is a bot message
     if (isBotMessage(message)) {
         llog.yellow("Skipped: Bot message detected");
         return;
@@ -38,10 +37,10 @@ exports.parseAll = async ({ client, message, say, event }) => {
         return;
     }
 
-
-
-    llog.gray(message);
     if (message.text) {
+        if (message.channel==process.env.SLACK_INTERVIEW_TEST_CHANNEL) {
+            const result = await interviewer({ client, message, say, event })
+        }
         // const result = await bkc({ client, message, say, event })
     } else {
         llog.blue("message has no text")

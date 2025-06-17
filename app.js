@@ -30,11 +30,10 @@ app.message(/.*/, handleMessages.parseAll);
     fs.mkdirSync("_output");
   }
   await app.start(process.env.PORT || 3000);
-  llog.yellow("⚡️ Bolt app is running!", process.env.OPENAI_API_KEY);
+  llog.yellow("⚡️ Bolt app is running!");
   let slackResult = await app.client.chat.postMessage({
     channel: process.env.SLACK_LOGGING_CHANNEL,
     text: "starting up the s25-interview-bot",
   });
 
-  
 })();
