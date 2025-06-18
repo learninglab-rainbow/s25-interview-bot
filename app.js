@@ -3,6 +3,7 @@ var path = require("path");
 var fs = require("fs");
 const llog = require("learninglab-log");
 const handleMessages = require("./src/handlers/message-handler");
+const { startTranscriber } = require("./src/bots/transcriber");
 global.ROOT_DIR = path.resolve(__dirname);
 
 require("dotenv").config({
@@ -36,4 +37,6 @@ app.message(/.*/, handleMessages.parseAll);
     text: "starting up the s25-interview-bot",
   });
 
+  startTranscriber(app.client);
+  llog.green("🎤 Transcriber started!");
 })();
