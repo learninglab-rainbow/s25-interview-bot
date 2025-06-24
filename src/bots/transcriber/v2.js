@@ -35,11 +35,7 @@ function startTranscriber(slackClient) {
         input_audio_transcription: { 
           model: 'gpt-4o-mini-transcribe'
         },
-        turn_detection: { 
-          type: 'server_vad',
-          interrupt_response: true,
-          silence_duration_ms: 500
-        },
+        turn_detection: { type: 'server_vad' },
         input_audio_noise_reduction: { type: 'near_field' }
       }
     };

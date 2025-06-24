@@ -1,19 +1,11 @@
 const WebSocket = require('ws');
 const record = require('node-record-lpcm16');
-const Speaker = require('speaker');
 
 function startTranscriber(slackClient) {
   const {
     OPENAI_API_KEY,
     SLACK_LOGGING_CHANNEL
   } = process.env;
-
-  // Create speaker for audio playback
-  const speaker = new Speaker({
-    channels: 1,
-    bitDepth: 16,
-    sampleRate: 24000
-  });
 
   const ws = new WebSocket(
     'wss://api.openai.com/v1/realtime?model=gpt-4o-mini-realtime-preview',
@@ -35,11 +27,7 @@ function startTranscriber(slackClient) {
         input_audio_transcription: { 
           model: 'gpt-4o-mini-transcribe'
         },
-        turn_detection: { 
-          type: 'server_vad',
-          interrupt_response: true,
-          silence_duration_ms: 500
-        },
+        turn_detection: { type: 'server_vad' },
         input_audio_noise_reduction: { type: 'near_field' }
       }
     };
@@ -65,11 +53,6 @@ function startTranscriber(slackClient) {
         channel: SLACK_LOGGING_CHANNEL,
         text: evt.transcript
       }).catch(console.error);
-    }
-    if (evt.type === 'response.audio.delta') {
-      // Decode base64 audio and stream to speaker
-      const audioBuffer = Buffer.from(evt.delta, 'base64');
-      speaker.write(audioBuffer);
     }
   });
 
