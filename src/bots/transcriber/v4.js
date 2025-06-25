@@ -2,12 +2,31 @@ const WebSocket = require('ws');
 const record = require('node-record-lpcm16');
 const Speaker = require('speaker');
 
+// Suppress mpg123 buffer underflow warnings
+const originalStderrWrite = process.stderr.write;
+process.stderr.write = function(chunk, encoding, callback) {
+  const str = chunk.toString();
+  if (str.includes('buffer underflow') || 
+      str.includes('mpg123') || 
+      str.includes('coreaudio.c') ||
+      str.includes('Didn\'t have any audio data')) {
+    // Call callback if provided to maintain proper stream behavior
+    if (typeof callback === 'function') {
+      callback();
+    }
+    return true; // Suppress the output
+  }
+  return originalStderrWrite.call(this, chunk, encoding, callback);
+};
+
 function startTranscriber(slackClient) {
   const { OPENAI_API_KEY, SLACK_LOGGING_CHANNEL } = process.env;
 
+  // Track if a response is currently active
+  let responseActive = false;
+
   // Create or replace speaker instance
   let speaker = createSpeaker();
-  let activeResponse = false;
 
   function createSpeaker() {
     const sp = new Speaker({ channels: 1, bitDepth: 16, sampleRate: 24000 });
@@ -18,8 +37,15 @@ function startTranscriber(slackClient) {
   function stopSpeaker() {
     try {
       if (speaker) {
-        console.log('[RT] 🛑 CLOSING SPEAKER IMMEDIATELY');
-        speaker.close();
+        console.log('[RT] 🛑 DESTROYING SPEAKER TO FULLY UNMOUNT');
+        speaker.removeAllListeners();
+        // Prefer destroy if available
+        if (typeof speaker.destroy === 'function') {
+          speaker.destroy();
+        } else {
+          speaker.close();
+        }
+        speaker = null;
       }
     } catch (err) {
       console.log('[RT] Error stopping speaker:', err.message);
@@ -28,7 +54,10 @@ function startTranscriber(slackClient) {
 
   function replaceSpeaker() {
     stopSpeaker();
-    speaker = createSpeaker();
+    // Add small delay to prevent rapid recreation
+    setTimeout(() => {
+      speaker = createSpeaker();
+    }, 50);
   }
 
   const ws = new WebSocket(
@@ -66,6 +95,11 @@ function startTranscriber(slackClient) {
       console.log('[RT] received event: response.audio.delta (audio suppressed)');
     }
 
+    // Mark response active when audio starts
+    if (evt.type === 'response.audio.delta') {
+      responseActive = true;
+    }
+
     // Transcript deltas
     if (evt.type === 'conversation.item.input_audio_transcription.delta') {
       process.stdout.write(evt.delta);
@@ -76,11 +110,10 @@ function startTranscriber(slackClient) {
       slackClient.chat.postMessage({ channel: SLACK_LOGGING_CHANNEL, text: evt.transcript }).catch(console.error);
     }
 
-    // Audio playback
+    // Audio stream events
     if (evt.type === 'response.audio.delta') {
-      activeResponse = true;
       const audioBuffer = Buffer.from(evt.delta, 'base64');
-      if (speaker && speaker.writable) {
+      if (speaker && speaker.writable && !speaker.destroyed) {
         try {
           speaker.write(audioBuffer);
         } catch (err) {
@@ -90,29 +123,35 @@ function startTranscriber(slackClient) {
       }
     }
 
-    // Handle interruption and cancellation
+    // Handle interruption and cancellation only if active
     if (evt.type === 'input_audio_buffer.speech_started') {
-      console.log('[RT] User started speaking - interrupting audio');
-      if (activeResponse) {
+      console.log('[RT] User started speaking - attempting interrupt');
+      if (responseActive) {
         ws.send(JSON.stringify({ type: 'response.cancel' }));
       }
       replaceSpeaker();
     }
     if (evt.type === 'response.cancelled') {
       console.log('[RT] Response cancelled - stopping audio');
-      activeResponse = false;
+      responseActive = false;
       replaceSpeaker();
     }
 
-    // Audio stream finished - let buffer drain naturally
+    // Graceful end: allow buffer to drain then replace
     if (evt.type === 'response.audio.done') {
-      console.log('[RT] Audio stream done - letting speaker buffer drain');
+      console.log('[RT] Audio stream done - ending speaker after drain');
+      speaker.end();
+      speaker.once('finish', () => {
+        console.log('[RT] Speaker finished playback - replacing speaker');
+        responseActive = false;
+        replaceSpeaker();
+      });
     }
 
-    // Final response event (no audio control)
+    // Final response event
     if (evt.type === 'response.done') {
       console.log('[RT] Response completed');
-      activeResponse = false;
+      responseActive = false;
     }
   });
 
@@ -120,13 +159,7 @@ function startTranscriber(slackClient) {
   ws.on('error', err => console.error(err));
 
   function startMic() {
-    const mic = record.record({ 
-      sampleRate: 16000, 
-      channels: 1, 
-      audioType: 'raw', 
-      endOnSilence: false,
-      highWaterMark: 1024 * 16
-    }).stream();
+    const mic = record.record({ sampleRate: 16000, channels: 1, audioType: 'raw', endOnSilence: false, highWaterMark: 1024 * 16 }).stream();
     mic.on('data', buf => {
       ws.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: buf.toString('base64') }));
     });
