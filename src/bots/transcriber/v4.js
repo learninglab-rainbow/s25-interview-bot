@@ -148,6 +148,17 @@ function startTranscriber(slackClient) {
       });
     }
 
+    // Bot response transcript completed
+    if (evt.type === 'response.audio_transcript.done') {
+      console.log('[RT] Bot response:', evt.transcript);
+      slackClient.chat.postMessage({
+        channel: SLACK_LOGGING_CHANNEL,
+        text: evt.transcript,
+        username: 'Interview Bot',
+        icon_url: 'https://files.slack.com/files-pri/T0HTW3H0V-F090UBMP4AF/img_1219.jpg?pub_secret=908f2ca505'
+      }).catch(console.error);
+    }
+
     // Final response event
     if (evt.type === 'response.done') {
       console.log('[RT] Response completed');

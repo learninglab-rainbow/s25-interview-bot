@@ -59,12 +59,20 @@ function startTranscriber(slackClient) {
   });
 
   ws.on('message', raw => {
-    const evt = JSON.parse(raw);
-    if (evt.type !== 'response.audio.delta') {
-      console.log('[RT] received event:', evt.type, evt);
-    } else {
-      console.log('[RT] received event: response.audio.delta (audio suppressed)');
+    try {
+      const evt = JSON.parse(raw);
+      if (evt.type !== 'response.audio.delta') {
+        console.log('[RT] received event:', evt.type, evt);
+      } else {
+        console.log('[RT] received event: response.audio.delta (audio suppressed)');
+      }
+      handleEvent(evt);
+    } catch (err) {
+      console.error('[RT] Error processing message:', err);
     }
+  });
+
+  function handleEvent(evt) {
 
     // Transcript deltas
     if (evt.type === 'conversation.item.input_audio_transcription.delta') {
@@ -109,12 +117,30 @@ function startTranscriber(slackClient) {
       console.log('[RT] Audio stream done - letting speaker buffer drain');
     }
 
+    // Bot response transcript completed
+    if (evt.type === 'response.audio_transcript.done') {
+      console.log('[RT] Bot response:', evt.transcript);
+      slackClient.chat.postMessage({
+        channel: SLACK_LOGGING_CHANNEL,
+        text: evt.transcript,
+        username: 'Interview Bot',
+        icon_url: 'https://files.slack.com/files-pri/T0HTW3H0V-F093R1ZR9SL/bot-interviewer-01.jpg?pub_secret=662af05676'
+      }).catch(err => {
+        console.error('[RT] Slack API Error:', err);
+        // Try fallback without custom username/icon
+        slackClient.chat.postMessage({
+          channel: SLACK_LOGGING_CHANNEL,
+          text: `🤖 ${evt.transcript}`
+        }).catch(console.error);
+      });
+    }
+
     // Final response event (no audio control)
     if (evt.type === 'response.done') {
       console.log('[RT] Response completed');
       activeResponse = false;
     }
-  });
+  }
 
   ws.on('close', (code, reason) => console.error(`socket closed ${code} – ${reason}`));
   ws.on('error', err => console.error(err));
