@@ -1,3 +1,5 @@
+// still an error when we cut the response off before it is complete
+
 const WebSocket = require('ws');
 const record = require('node-record-lpcm16');
 const Speaker = require('speaker');
@@ -8,8 +10,6 @@ function startTranscriber(slackClient) {
   // Create or replace speaker instance
   let speaker = createSpeaker();
   let activeResponse = false;
-  let currentResponseId = null;
-  let cancellationSent = false;
 
   function createSpeaker() {
     const sp = new Speaker({ channels: 1, bitDepth: 16, sampleRate: 24000 });
@@ -75,11 +75,6 @@ function startTranscriber(slackClient) {
   });
 
   function handleEvent(evt) {
-    // Handle errors gracefully
-    if (evt.type === 'error') {
-      console.log('[RT] API Error:', evt.error.message);
-      return; // Don't process further
-    }
 
     // Transcript deltas
     if (evt.type === 'conversation.item.input_audio_transcription.delta') {
@@ -93,16 +88,14 @@ function startTranscriber(slackClient) {
 
     // Audio playback
     if (evt.type === 'response.audio.delta') {
-      // Only play audio from the current response
-      if (evt.response_id === currentResponseId && activeResponse) {
-        const audioBuffer = Buffer.from(evt.delta, 'base64');
-        if (speaker && speaker.writable) {
-          try {
-            speaker.write(audioBuffer);
-          } catch (err) {
-            console.log('[RT] Speaker write error:', err.message);
-            replaceSpeaker();
-          }
+      activeResponse = true;
+      const audioBuffer = Buffer.from(evt.delta, 'base64');
+      if (speaker && speaker.writable) {
+        try {
+          speaker.write(audioBuffer);
+        } catch (err) {
+          console.log('[RT] Speaker write error:', err.message);
+          replaceSpeaker();
         }
       }
     }
@@ -110,19 +103,14 @@ function startTranscriber(slackClient) {
     // Handle interruption and cancellation
     if (evt.type === 'input_audio_buffer.speech_started') {
       console.log('[RT] User started speaking - interrupting audio');
-      if (activeResponse && currentResponseId && !cancellationSent) {
+      if (activeResponse) {
         ws.send(JSON.stringify({ type: 'response.cancel' }));
-        cancellationSent = true;
-        activeResponse = false;
-        currentResponseId = null;
       }
       replaceSpeaker();
     }
     if (evt.type === 'response.cancelled') {
       console.log('[RT] Response cancelled - stopping audio');
       activeResponse = false;
-      currentResponseId = null;
-      cancellationSent = false;
       replaceSpeaker();
     }
 
@@ -131,54 +119,28 @@ function startTranscriber(slackClient) {
       console.log('[RT] Audio stream done - letting speaker buffer drain');
     }
 
-    // Track new responses
-    if (evt.type === 'response.created') {
-      activeResponse = true;
-      currentResponseId = evt.response.id;
-      cancellationSent = false;
-      console.log('[RT] New response started:', currentResponseId);
-    }
-
     // Bot response transcript completed
     if (evt.type === 'response.audio_transcript.done') {
       console.log('[RT] Bot response:', evt.transcript);
-      // Only post complete responses from the current response
-      if (evt.response_id === currentResponseId && evt.transcript && evt.transcript.trim().length > 0) {
-        try {
-          slackClient.chat.postMessage({
-            channel: SLACK_LOGGING_CHANNEL,
-            text: evt.transcript,
-            username: 'Interview Bot',
-            icon_url: 'https://files.slack.com/files-pri/T0HTW3H0V-F093R1ZR9SL/bot-interviewer-01.jpg?pub_secret=662af05676'
-          }).then(result => {
-            console.log('[RT] Bot message posted successfully');
-          }).catch(err => {
-            console.error('[RT] Slack API Error:', err);
-            // Try fallback without custom username/icon
-            return slackClient.chat.postMessage({
-              channel: SLACK_LOGGING_CHANNEL,
-              text: `🤖 ${evt.transcript}`
-            });
-          }).catch(err => {
-            console.error('[RT] Fallback Slack API Error:', err);
-          });
-        } catch (err) {
-          console.error('[RT] Sync error in Slack posting:', err);
-        }
-      } else {
-        console.log('[RT] Skipping bot response - not current or empty');
-      }
+      slackClient.chat.postMessage({
+        channel: SLACK_LOGGING_CHANNEL,
+        text: evt.transcript,
+        username: 'Interview Bot',
+        icon_url: 'https://files.slack.com/files-pri/T0HTW3H0V-F093R1ZR9SL/bot-interviewer-01.jpg?pub_secret=662af05676'
+      }).catch(err => {
+        console.error('[RT] Slack API Error:', err);
+        // Try fallback without custom username/icon
+        slackClient.chat.postMessage({
+          channel: SLACK_LOGGING_CHANNEL,
+          text: `🤖 ${evt.transcript}`
+        }).catch(console.error);
+      });
     }
 
     // Final response event (no audio control)
     if (evt.type === 'response.done') {
       console.log('[RT] Response completed');
-      // Only clear state if this is the current response
-      if (evt.response.id === currentResponseId) {
-        activeResponse = false;
-        currentResponseId = null;
-        cancellationSent = false;
-      }
+      activeResponse = false;
     }
   }
 
