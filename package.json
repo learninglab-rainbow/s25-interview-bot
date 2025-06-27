@@ -5,7 +5,8 @@
   "main": "index.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "NODE_ENV=dev nodemon ./app.js 2>&1 | grep -v 'buffer underflow'"
+    "dev": "NODE_ENV=dev nodemon ./app.js 2>&1 | grep -v 'buffer underflow'",
+    "debug": "NODE_ENV=debug DEBUG_MODE=true nodemon ./app.js"
   },
   "author": "mk",
   "license": "ISC",

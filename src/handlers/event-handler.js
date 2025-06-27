@@ -1,5 +1,6 @@
 const llog = require("learninglab-log");
 const path = require("path");
+const errorLogger = require("../utils/error-logger");
 
 // exports.fileShared = async ({ event, client}) => {
 //   try {
@@ -73,6 +74,7 @@ const handleVisionRequest = async ({ event, client }) => {
       }
     } catch (error) {
       llog.red(error);
+      errorLogger.logError(error, 'VISION-REQUEST-ERROR');
     }
   }
 };
@@ -96,6 +98,7 @@ const explainRequest = async ({ event, client }) => {
     return "successful explainRequest";
   } catch (error) {
     llog.red(`Error in explainRequest: ${error}`);
+    errorLogger.logError(error, 'EXPLAIN-REQUEST-ERROR');
   }
 };
 
